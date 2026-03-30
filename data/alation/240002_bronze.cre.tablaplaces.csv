@@ -1,0 +1,9 @@
+﻿al_datadict_item_properties,al_datadict_item_column_data_type,key,title,description,"""admite nulos | allows nulls""","""campo clave (llave) | unique key""","""clasificación datos sensibles | confidentiality level""","""contiene información sensible | contains sensible information""",data custodian:user,data steward:groupprofile,data steward:user,"""nivel confidencialidad | confidentiality level""","""origen del dato | data origin""","""reglas de calidad de datos | data quality rules""","""reutilizable | reusable ♻️"""
+oid=240002;otype=table,,bronze.cre.tablaplaces,,,_,_,_,_,,,,_,_,_,Si
+oid=3055675;otype=attribute,STRING,12.bronze.cre.tablaplaces.Hora,,,Si,No,_,,_,_,_,_,_,_,_
+oid=3055694;otype=attribute,DATE,12.bronze.cre.tablaplaces.Fecha,,,Si,No,_,,_,_,_,_,_,_,_
+oid=3055717;otype=attribute,STRING,12.bronze.cre.tablaplaces.x,,,Si,No,_,,_,_,_,_,_,_,_
+oid=3055757;otype=attribute,STRING,12.bronze.cre.tablaplaces.cre_id,,,Si,No,_,,_,_,_,_,_,_,_
+oid=3055762;otype=attribute,STRING,12.bronze.cre.tablaplaces.y,,,Si,No,_,,_,_,_,_,_,_,_
+oid=3055778;otype=attribute,STRING,12.bronze.cre.tablaplaces.place_id,,,Si,No,_,,_,_,_,_,_,_,_
+oid=3055798;otype=attribute,STRING,12.bronze.cre.tablaplaces.name,,,Si,No,_,,_,_,_,_,_,_,_

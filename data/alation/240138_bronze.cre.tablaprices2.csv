@@ -1,0 +1,8 @@
+﻿al_datadict_item_properties,al_datadict_item_column_data_type,key,title,description,"""admite nulos | allows nulls""","""campo clave (llave) | unique key""","""clasificación datos sensibles | confidentiality level""","""contiene información sensible | contains sensible information""",data custodian:user,data steward:groupprofile,data steward:user,"""nivel confidencialidad | confidentiality level""","""origen del dato | data origin""","""reglas de calidad de datos | data quality rules""","""reutilizable | reusable ♻️"""
+oid=240138;otype=table,,bronze.cre.tablaprices2,,,_,_,_,_,,,,_,_,_,Si
+oid=3055734;otype=attribute,DOUBLE,12.bronze.cre.tablaprices2.premium_price,,,Si,No,_,,_,_,_,_,_,_,_
+oid=3055761;otype=attribute,DATE,12.bronze.cre.tablaprices2.Fecha,,,Si,No,_,,_,_,_,_,_,_,_
+oid=3055766;otype=attribute,STRING,12.bronze.cre.tablaprices2.Hora,,,Si,No,_,,_,_,_,_,_,_,_
+oid=3055790;otype=attribute,DOUBLE,12.bronze.cre.tablaprices2.diesel_price,,,Si,No,_,,_,_,_,_,_,_,_
+oid=3055802;otype=attribute,DOUBLE,12.bronze.cre.tablaprices2.regular_price,,,Si,No,_,,_,_,_,_,_,_,_
+oid=3055889;otype=attribute,LONG,12.bronze.cre.tablaprices2.place_id,,,Si,No,_,,_,_,_,_,_,_,_
