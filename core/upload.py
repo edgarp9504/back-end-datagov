@@ -16,6 +16,17 @@ logger = logging.getLogger(__name__)
 
 CONFIG_ES = {
     "key_col": "Nombre del Campo",
+    "required_cols": [
+        "Nombre del Campo",
+        "Descripción",
+        "Admite Nulos",
+        "Longitud Regulada",
+        "Fórmula",
+        "Origen del Dato",
+        "Clave única de Registro",
+        "Nivel Confidencialidad",
+        "Clasificación de Datos Sensibles",
+    ],
     "mapping": {
         "description": "Descripción",
         '"admite nulos | allows nulls"': "Admite Nulos",
@@ -38,6 +49,17 @@ CONFIG_ES = {
 
 CONFIG_EN = {
     "key_col": "Column Name",
+    "required_cols": [
+        "Column Name",
+        "Description",
+        "Allows Nulls",
+        "Regulated Length",
+        "Formula",
+        "Source",
+        "Unique Key",
+        "Privacy Level",
+        "Confidentiality Level",
+    ],
     "mapping": {
         "description": "Description",
         '"admite nulos | allows nulls"': "Allows Nulls",
@@ -65,6 +87,10 @@ def _detect_encoding(path: str) -> str:
 
 
 def _upload_to_alation(url: str, csv_path: str, encoding: str, api_token: str) -> int:
+    """
+    Sube el CSV a Alation. Lanza requests.HTTPError si el servidor devuelve un
+    status no-2xx, incluyendo el cuerpo de la respuesta en el mensaje de error.
+    """
     token = api_token or settings.alation_api_token
     headers = {"accept": "application/json", "TOKEN": token}
     with open(csv_path, "r", encoding=encoding) as f:
@@ -74,7 +100,116 @@ def _upload_to_alation(url: str, csv_path: str, encoding: str, api_token: str) -
             headers=headers,
             files={"file": (csv_path, f, "text/csv")},
         )
+
+    if not r.ok:
+        detail = r.text[:300].strip() if r.text else "(sin detalle)"
+        raise requests.HTTPError(
+            f"HTTP {r.status_code} al subir a Alation: {detail}",
+            response=r,
+        )
+
     return r.status_code
+
+
+def _validate_headers(
+    df_data: pd.DataFrame,
+    config: dict,
+    _log: Callable[[str], None],
+    sheet_name: str,
+) -> bool:
+    """
+    Valida que la hoja tenga los encabezados del formato DataGov.
+
+    - Columna clave faltante → retorna False (no se puede procesar).
+    - Otras columnas faltantes → avisa pero continúa (retorna True).
+    - Columnas extra → notifica (se subirán igual).
+    """
+    key_col = config["key_col"]
+    required = config["required_cols"]
+    actual = set(df_data.columns.tolist())
+
+    # Columna clave es obligatoria: sin ella no se puede hacer el merge
+    if key_col not in actual:
+        _log(
+            f"  ❌ Hoja '{sheet_name}': falta la columna clave '{key_col}'. "
+            "No se puede procesar esta hoja."
+        )
+        return False
+
+    # Columnas requeridas faltantes (no críticas, solo aviso)
+    missing = [col for col in required if col not in actual and col != key_col]
+    if missing:
+        _log(
+            f"  ⚠ Hoja '{sheet_name}': columnas faltantes del formato DataGov "
+            f"({len(missing)}): {', '.join(missing)}"
+        )
+
+    # Columnas extra (se subirán igual, solo notificar)
+    known = set(required)
+    extra = [
+        col for col in actual
+        if col not in known and not str(col).startswith("Unnamed")
+    ]
+    if extra:
+        _log(
+            f"  ℹ Hoja '{sheet_name}': columnas adicionales detectadas "
+            f"(se subirán igual): {', '.join(extra)}"
+        )
+
+    return True
+
+
+def _validate_rows(
+    df_data: pd.DataFrame,
+    config: dict,
+    _log: Callable[[str], None],
+    sheet_name: str,
+) -> int:
+    """
+    Valida los registros de la hoja e informa errores por fila.
+
+    Checks:
+    - Campo clave vacío (error crítico por fila).
+    - Descripción vacía (advertencia por campo).
+
+    Retorna el número total de registros con algún problema.
+    """
+    key_col = config["key_col"]
+    desc_col = config["mapping"].get("description")
+    total_errors = 0
+
+    def _is_blank(series: pd.Series) -> pd.Series:
+        return series.isna() | (series.astype(str).str.strip().isin(["", "nan", "NaN", "None"]))
+
+    # Filas con campo clave vacío
+    blank_key = _is_blank(df_data[key_col])
+    if blank_key.any():
+        row_nums = (blank_key[blank_key].index + 2).tolist()  # +2: fila 1=título, 1-indexed
+        _log(
+            f"  ❌ Hoja '{sheet_name}': {blank_key.sum()} fila(s) con "
+            f"'{key_col}' vacío — filas del Excel: {row_nums}"
+        )
+        total_errors += int(blank_key.sum())
+
+    # Campos con descripción vacía (solo en filas que sí tienen clave)
+    if desc_col and desc_col in df_data.columns:
+        valid_key = ~blank_key
+        blank_desc = _is_blank(df_data[desc_col]) & valid_key
+        if blank_desc.any():
+            field_names = df_data.loc[blank_desc, key_col].astype(str).tolist()
+            sample = field_names[:5]
+            remainder = len(field_names) - len(sample)
+            display = ", ".join(sample) + (f" (+{remainder} más)" if remainder else "")
+            _log(
+                f"  ⚠ Hoja '{sheet_name}': {len(field_names)} campo(s) sin descripción: "
+                f"{display}"
+            )
+            total_errors += len(field_names)
+
+    if total_errors == 0:
+        _log(f"  ✓ Hoja '{sheet_name}': todos los registros validados correctamente.")
+
+    return total_errors
 
 
 def _build_csv_index(csv_dir: Path) -> dict[str, Path]:
@@ -92,6 +227,32 @@ def _normalize_text(value: str) -> str:
     text = unicodedata.normalize("NFKD", str(value))
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
     return "".join(ch.lower() for ch in text if ch.isalnum())
+
+
+def _title_from_key(value: object) -> str:
+    """
+    Construye un title legible a partir de key.
+
+    Ejemplo:
+      2.DBZPRD_MEX_OXXO.LAND_EBS_TRAN.AP_INVOICES_ALL.PAY_CURR_INVOICE_AMOUNT
+      -> Pay curr invoice amount
+    """
+    if value is None or pd.isna(value):
+        return ""
+
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    tail = text.split(".")[-1].strip()
+    if not tail:
+        return ""
+
+    normalized = re.sub(r"\s+", " ", tail.replace("_", " ").lower()).strip()
+    if not normalized:
+        return ""
+
+    return normalized[0].upper() + normalized[1:]
 
 
 def _infer_oid_from_filename(path_xls: Path, csv_index: dict[str, Path]) -> str | None:
@@ -207,15 +368,18 @@ def upload_all(
 
     total_uploaded = 0
     total_warned = 0
+    total_failed = 0
 
     for path_xls in files_xls:
         _log(f"📄 Procesando Excel: {path_xls.name}")
 
         try:
-            xl = pd.ExcelFile(path_xls, engine="openpyxl")
-            all_sheets = xl.sheet_names
+            # Cerrar explícitamente el handle del xlsx para evitar bloqueos en Windows.
+            with pd.ExcelFile(path_xls, engine="openpyxl") as xl:
+                all_sheets = xl.sheet_names
         except Exception as exc:
             _log(f"  ❌ No se pudo leer {path_xls.name}: {exc}")
+            total_failed += 1
             continue
 
         table_sources = _resolve_table_sources(path_xls, all_sheets, csv_index, _log)
@@ -270,6 +434,15 @@ def upload_all(
                 df_data = pd.read_excel(
                     path_xls, sheet_name=sheet_name, skiprows=1, engine="openpyxl"
                 )
+
+                # ── PUNTO 1: Validar encabezados DataGov ─────────────────────
+                if not _validate_headers(df_data, config, _log, sheet_name):
+                    total_failed += 1
+                    continue
+
+                # ── PUNTO 2: Validar errores por registro ─────────────────────
+                _validate_rows(df_data, config, _log, sheet_name)
+
                 df_data["KEY_ID"] = df_data[config["key_col"]].astype(str).str.upper()
 
                 df_union = pd.merge(df_csv, df_data, on="KEY_ID", how="left")
@@ -284,6 +457,15 @@ def upload_all(
                 drop_cols = [c for c in config["drop_cols"] if c in df_union.columns]
                 df_union = df_union.drop(columns=drop_cols)
 
+                if "title" in df_union.columns and "key" in df_union.columns:
+                    missing_title = (
+                        df_union["title"].isna()
+                        | (df_union["title"].astype(str).str.strip() == "")
+                    )
+                    df_union.loc[missing_title, "title"] = (
+                        df_union.loc[missing_title, "key"].apply(_title_from_key)
+                    )
+
                 path_dest = settings.destination / f"{oid}.csv"
                 df_union.to_csv(path_dest, index=False, encoding=encoding)
 
@@ -291,13 +473,34 @@ def upload_all(
                     f"{settings.alation_base_url}"
                     f"/integration/v1/data_dictionary/table/{oid}/upload/"
                 )
+
+                # ── PUNTO 3: Subida con confirmación real de HTTP ─────────────
                 status = _upload_to_alation(url, str(path_dest), encoding, api_token)
-                _log(f"    ✓ OID={oid} ({path_csv.stem}) · HTTP {status}")
+                _log(
+                    f"    ✅ OID={oid} ({path_csv.stem}) subido exitosamente "
+                    f"· HTTP {status}"
+                )
                 total_uploaded += 1
+
+            except requests.HTTPError as http_err:
+                _log(f"    ❌ OID={oid}: Alation rechazó la subida — {http_err}")
+                logger.error("HTTPError OID=%s: %s", oid, http_err)
+                total_failed += 1
 
             except Exception as exc:
                 _log(f"    ❌ Error procesando OID={oid}: {exc}")
                 logger.exception("Error procesando OID=%s", oid)
+                total_failed += 1
 
-    omitidas = f", {total_warned} omitida(s) por falta de CSV." if total_warned else "."
-    _log(f"\n✅ Finalizado: {total_uploaded} tabla(s) subidas exitosamente{omitidas}")
+    # ── Resumen final ─────────────────────────────────────────────────────────
+    parts = [f"✅ {total_uploaded} tabla(s) subidas exitosamente a Alation"]
+    if total_warned:
+        parts.append(f"⚠ {total_warned} omitida(s) por falta de CSV")
+    if total_failed:
+        parts.append(f"❌ {total_failed} fallida(s) (revisa los logs)")
+    _log(f"\n{'  |  '.join(parts)}")
+
+    if total_uploaded == 0 and total_failed > 0:
+        raise RuntimeError(
+            f"Ninguna tabla se subió correctamente. {total_failed} error(es). Revisa los logs."
+        )

@@ -46,9 +46,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_ALLOWED_ORIGINS = [
+    "https://datadictionary-frontend.vercel.app",
+    "https://datadictionary-frontend-r9cm5ao3n-edgarp9504s-projects.vercel.app",
+    "http://localhost:5173",  # dev local
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
