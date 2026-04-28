@@ -14,6 +14,20 @@ from core.alation_client import validate_auth
 
 logger = logging.getLogger(__name__)
 
+_ALLOWED_VALUES_ES = {
+    "Admite Nulos": {"Si", "No"},
+    "Clave única de Registro": {"Si", "No"},
+    "Nivel Confidencialidad": {"Pública", "Uso interno", "Restringida", "Confidencial"},
+    "Clasificación de Datos Sensibles": {"Nivel Estandar", "Nivel Sensible", "Nivel Especial"},
+}
+
+_ALLOWED_VALUES_EN = {
+    "Allows Nulls": {"Si", "No"},
+    "Unique Key": {"Si", "No"},
+    "Privacy Level": {"Pública", "Uso interno", "Restringida", "Confidencial"},
+    "Confidentiality Level": {"Nivel Estandar", "Nivel Sensible", "Nivel Especial"},
+}
+
 CONFIG_ES = {
     "key_col": "Nombre del Campo",
     "required_cols": [
@@ -27,6 +41,7 @@ CONFIG_ES = {
         "Nivel Confidencialidad",
         "Clasificación de Datos Sensibles",
     ],
+    "allowed_values": _ALLOWED_VALUES_ES,
     "mapping": {
         "description": "Descripción",
         '"admite nulos | allows nulls"': "Admite Nulos",
@@ -60,6 +75,7 @@ CONFIG_EN = {
         "Privacy Level",
         "Confidentiality Level",
     ],
+    "allowed_values": _ALLOWED_VALUES_EN,
     "mapping": {
         "description": "Description",
         '"admite nulos | allows nulls"': "Allows Nulls",
@@ -208,6 +224,45 @@ def _validate_rows(
 
     if total_errors == 0:
         _log(f"  ✓ Hoja '{sheet_name}': todos los registros validados correctamente.")
+
+    return total_errors
+
+
+def _validate_column_values(
+    df_data: pd.DataFrame,
+    config: dict,
+    _log: Callable[[str], None],
+    sheet_name: str,
+) -> int:
+    """
+    Valida que columnas con dominio fijo contengan solo valores permitidos.
+    Retorna el número de celdas con valor inválido.
+    """
+    allowed_map = config.get("allowed_values", {})
+    key_col = config["key_col"]
+    total_errors = 0
+
+    for col, valid_set in allowed_map.items():
+        if col not in df_data.columns:
+            continue
+
+        valid_normalized = {v.strip().lower() for v in valid_set}
+        filled = df_data[col].notna() & (df_data[col].astype(str).str.strip() != "")
+        invalid = filled & ~df_data[col].astype(str).str.strip().str.lower().isin(valid_normalized)
+
+        if not invalid.any():
+            continue
+
+        allowed_str = ", ".join(sorted(valid_set))
+        for _, row in df_data.loc[invalid, [key_col, col]].iterrows():
+            field_name = str(row[key_col])
+            bad_val = str(row[col]).strip()
+            _log(
+                f"  ❌ Hoja '{sheet_name}': campo '{field_name}' — "
+                f"'{col}' = '{bad_val}' no es un valor permitido. "
+                f"Permitidos: {allowed_str}"
+            )
+        total_errors += int(invalid.sum())
 
     return total_errors
 
@@ -442,6 +497,15 @@ def upload_all(
 
                 # ── PUNTO 2: Validar errores por registro ─────────────────────
                 _validate_rows(df_data, config, _log, sheet_name)
+
+                # ── PUNTO 2B: Validar valores de dominio fijo ─────────────────
+                if _validate_column_values(df_data, config, _log, sheet_name) > 0:
+                    _log(
+                        f"  ❌ Hoja '{sheet_name}': subida bloqueada por valores inválidos. "
+                        "Corrige el Excel y vuelve a intentarlo."
+                    )
+                    total_failed += 1
+                    continue
 
                 df_data["KEY_ID"] = df_data[config["key_col"]].astype(str).str.upper()
 

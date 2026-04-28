@@ -13,7 +13,9 @@ logger = logging.getLogger(__name__)
 _CUSTOM_FIELD_MAP: dict[str, int] = {
     "admite nulos": 5,       "allows nulls": 5,
     "campo clave": 6,        "unique key": 6,
-    "clasificación datos sensibles": 7, "confidentiality level": 7,
+    # "confidentiality level" se omite aquí porque también aparece en el nombre
+    # de "nivel confidencialidad | confidentiality level" causando falso match.
+    "clasificación datos sensibles": 7,
     "contiene información sensible": 8, "contains sensible information": 8,
     "data custodian": 9,
     "data steward": 10,
