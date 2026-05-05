@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.settings import settings
-from routers import auth, jobs, tables, files, config_router
+from routers import alation, auth, config_router, files, jobs, tables
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -60,11 +60,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router,          prefix="/api/v1/auth",   tags=["Autenticación"])
-app.include_router(jobs.router,          prefix="/api/v1/jobs",   tags=["Jobs"])
-app.include_router(tables.router,        prefix="/api/v1/tables", tags=["Tablas"])
-app.include_router(files.router,         prefix="/api/v1/files",  tags=["Archivos"])
-app.include_router(config_router.router, prefix="/api/v1/config", tags=["Configuración"])
+app.include_router(auth.router,          prefix="/api/v1/auth",    tags=["Autenticación"])
+app.include_router(jobs.router,          prefix="/api/v1/jobs",    tags=["Jobs"])
+app.include_router(tables.router,        prefix="/api/v1/tables",  tags=["Tablas"])
+app.include_router(files.router,         prefix="/api/v1/files",   tags=["Archivos"])
+app.include_router(alation.router,       prefix="/api/v1/alation", tags=["Alation Catalog"])
+app.include_router(config_router.router, prefix="/api/v1/config",  tags=["Configuración"])
 
 
 @app.get("/", tags=["Root"])

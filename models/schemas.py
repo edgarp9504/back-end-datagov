@@ -89,3 +89,25 @@ class TableValidateResult(BaseModel):
 
 class TableBulkSave(BaseModel):
     entries: list[TableEntry]
+
+
+# ── Navegador de Alation (Database → Schema → Table) ─────────────────────────
+
+class AlationDataSource(BaseModel):
+    id: int
+    title: Optional[str] = None
+    dbtype: Optional[str] = None
+    dbname: Optional[str] = None
+
+
+class AlationSchemaInfo(BaseModel):
+    id: int
+    name: Optional[str] = None
+    title: Optional[str] = None
+
+
+class AlationTableInfo(BaseModel):
+    id: int
+    name: Optional[str] = None
+    title: Optional[str] = None
+    schema_name: Optional[str] = None

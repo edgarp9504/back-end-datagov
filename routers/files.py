@@ -1,12 +1,13 @@
 """Endpoints para gestionar archivos de datos (Tables.xlsx, CSVs, Excels)."""
 import io
 import shutil
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File
+from fastapi.responses import FileResponse, Response
 
 from models.schemas import FileInfo, TablesStatus
 from core.settings import settings
@@ -90,6 +91,42 @@ async def upload_tables_file(file: UploadFile = File(...)):
 async def list_alation_files():
     """Lista los CSV descargados desde Alation (data/alation/)."""
     return _list_dir(settings.source_alation, "*.csv")
+
+
+@router.get("/alation/download-zip")
+async def download_alation_zip(
+    oids: str | None = Query(
+        None,
+        description="OIDs separados por coma para filtrar. Si se omite, empaqueta todos los CSVs.",
+    ),
+):
+    """Empaqueta los CSVs de data/alation/ en un ZIP en memoria y lo devuelve."""
+    directory = settings.source_alation
+    if not directory.exists():
+        raise HTTPException(status_code=404, detail="Carpeta 'alation' no existe.")
+
+    files = sorted(directory.glob("*.csv"))
+
+    if oids:
+        oid_set = {o.strip() for o in oids.split(",") if o.strip()}
+        files = [f for f in files if any(f.name.startswith(o) for o in oid_set)]
+
+    if not files:
+        raise HTTPException(status_code=404, detail="No hay archivos para empaquetar.")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in files:
+            zf.write(f, arcname=f.name)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    archive_name = f"alation_csvs_{timestamp}.zip"
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{archive_name}"'},
+    )
 
 
 @router.get("/alation/{filename}/download")
