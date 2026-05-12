@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     alation_bearer_token: str = ""
     alation_api_token: str = ""
 
+    # Cuenta de servicio (refresh token + user_id). Si están presentes, el
+    # backend funciona sin que el usuario tenga que pegar nada en la UI:
+    # cada request los intercambia automáticamente por un API access token.
+    alation_refresh_token: str = ""
+    alation_user_id: int = 0
+
     # Directorio de datos (relativo a la raíz del backend)
     path_data: str = "data"
 

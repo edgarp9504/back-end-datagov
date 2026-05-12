@@ -30,7 +30,7 @@ async def list_datasources(tokens: dict = Depends(get_tokens)):
 
     try:
         records = get_all(
-            f"{settings.alation_base_url}/integration/v1/datasource/",
+            f"{settings.alation_base_url}/integration/v2/datasource/",
             {"limit": 500},
             auth_type="download",
             bearer_token=tokens["bearer_token"],
@@ -47,12 +47,14 @@ async def list_datasources(tokens: dict = Depends(get_tokens)):
         # Alation marca como ocultos algunos datasources internos; los omitimos.
         if r.get("is_hidden") is True:
             continue
+        if r.get("deleted") is True:
+            continue
         out.append(
             AlationDataSource(
                 id=int(r["id"]),
                 title=_safe_get(r, "title"),
                 dbtype=_safe_get(r, "dbtype"),
-                dbname=_safe_get(r, "dbname"),
+                dbname=_safe_get(r, "dbname", "db_username"),
             )
         )
     out.sort(key=lambda d: ((d.title or d.dbname or "").lower(), d.id))
