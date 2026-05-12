@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     alation_refresh_token: str = ""
     alation_user_id: int = 0
 
+    # Sólo se exponen al navegador los datasources cuyo título empiece con
+    # alguno de estos prefijos (case-insensitive). Valor por defecto:
+    # "Snowflake" — oculta Alation Analytics, Databricks, Data Factory, etc.
+    # Lista separada por comas. Vacío = mostrar todos.
+    alation_datasource_title_prefixes: str = "Snowflake"
+
     # Directorio de datos (relativo a la raíz del backend)
     path_data: str = "data"
 

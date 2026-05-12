@@ -42,6 +42,14 @@ async def list_datasources(tokens: dict = Depends(get_tokens)):
             detail=f"Error consultando Alation: {exc}",
         )
 
+    # Prefijos permitidos (case-insensitive). Si la lista está vacía,
+    # se aceptan todos los datasources.
+    allowed_prefixes = tuple(
+        p.strip().lower()
+        for p in settings.alation_datasource_title_prefixes.split(",")
+        if p.strip()
+    )
+
     out: list[AlationDataSource] = []
     for r in records:
         # Alation marca como ocultos algunos datasources internos; los omitimos.
@@ -49,6 +57,11 @@ async def list_datasources(tokens: dict = Depends(get_tokens)):
             continue
         if r.get("deleted") is True:
             continue
+
+        title = (_safe_get(r, "title") or "").strip()
+        if allowed_prefixes and not title.lower().startswith(allowed_prefixes):
+            continue
+
         out.append(
             AlationDataSource(
                 id=int(r["id"]),
