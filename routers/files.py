@@ -138,6 +138,44 @@ async def download_alation_file(filename: str):
     return FileResponse(path=str(target), media_type="text/csv", filename=filename)
 
 
+@router.delete("/alation", status_code=200)
+async def delete_alation_files(
+    oids: str | None = Query(
+        None,
+        description="OIDs separados por coma. Solo se borran los CSVs cuyo nombre empieza con uno de estos OIDs. Si se omite, NO borra nada (defensa).",
+    ),
+):
+    """Borra CSVs de `data/alation/` filtrados por OIDs.
+
+    Pensado para el cleanup automático tras descargar el ZIP en el navegador:
+    el frontend llama a este endpoint con los mismos OIDs que recién empaquetó.
+    """
+    if not oids:
+        # Defensa: nunca borrar "todo" sin filtro explícito.
+        return {"deleted": 0, "files": []}
+
+    directory = settings.source_alation
+    if not directory.exists():
+        return {"deleted": 0, "files": []}
+
+    oid_set = {o.strip() for o in oids.split(",") if o.strip()}
+    if not oid_set:
+        return {"deleted": 0, "files": []}
+
+    deleted: list[str] = []
+    for f in directory.glob("*.csv"):
+        if any(f.name.startswith(o) for o in oid_set):
+            try:
+                f.unlink()
+                deleted.append(f.name)
+            except OSError:
+                # Si un archivo está bloqueado (Windows) o falla, lo saltamos:
+                # un cleanup parcial es mejor que un 500 que no limpia nada.
+                continue
+
+    return {"deleted": len(deleted), "files": deleted}
+
+
 # ── Excels de formato (enriquecimiento) ───────────────────────────────────────
 
 @router.get("/format", response_model=list[FileInfo])
