@@ -1,5 +1,5 @@
 """Schemas Pydantic para la API."""
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel
 
 
@@ -19,6 +19,10 @@ class JobStatusResponse(BaseModel):
 
 
 class UploadRequest(BaseModel):
+    # "datagov" mantiene el flujo legacy (Excel + merge + lang).
+    # "alation" sube CSVs en formato nativo de Alation tal cual (sin merge,
+    # `lang` se ignora).
+    dict_type: Literal["datagov", "alation"] = "datagov"
     lang: str = "es"
 
 

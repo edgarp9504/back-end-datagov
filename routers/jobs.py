@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from models.schemas import JobResponse, JobStatusResponse, UploadRequest, DownloadRequest
 from services.job_manager import create_job, get_job, list_jobs, run_job
 from core.download import download_all
-from core.upload import upload_all
+from core.upload import upload_alation_format, upload_all
 from dependencies import get_tokens
 
 router = APIRouter()
@@ -45,15 +45,25 @@ async def start_upload(request: UploadRequest, tokens: dict = Depends(get_tokens
     """
     Inicia la carga de diccionarios hacia Alation.
 
-    Usa el token del header X-Api-Token de la sesión del usuario.
+    `dict_type` decide el pipeline:
+    - "datagov" (default): Excel ↔ CSV merge con traducción ES/EN.
+    - "alation": CSVs en formato nativo de Alation se suben verbatim.
     """
-    job = create_job(f"Carga ({request.lang.upper()})")
-    run_job(
-        job,
-        upload_all,
-        api_token=tokens["api_token"],
-        lang=request.lang,
-    )
+    if request.dict_type == "alation":
+        job = create_job("Carga (Alation)")
+        run_job(
+            job,
+            upload_alation_format,
+            api_token=tokens["api_token"],
+        )
+    else:
+        job = create_job(f"Carga ({request.lang.upper()})")
+        run_job(
+            job,
+            upload_all,
+            api_token=tokens["api_token"],
+            lang=request.lang,
+        )
     return JobResponse(job_id=job.job_id, status=job.status)
 
 

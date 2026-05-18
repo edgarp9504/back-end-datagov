@@ -228,6 +228,17 @@ def _validate_rows(
     return total_errors
 
 
+def _normalize_for_domain_match(value: object) -> str:
+    """Normaliza para comparar dominios: quita emojis/símbolos, colapsa espacios, minúsculas.
+
+    Conserva letras acentuadas (\\w en Python 3 es unicode-aware) para que
+    'Pública' siga validando. Strippea iconos tipo '🟡' que la plantilla usa
+    como marcador visual de nivel de confidencialidad.
+    """
+    cleaned = re.sub(r"[^\w\s]", " ", str(value), flags=re.UNICODE)
+    return re.sub(r"\s+", " ", cleaned).strip().lower()
+
+
 def _validate_column_values(
     df_data: pd.DataFrame,
     config: dict,
@@ -246,9 +257,10 @@ def _validate_column_values(
         if col not in df_data.columns:
             continue
 
-        valid_normalized = {v.strip().lower() for v in valid_set}
-        filled = df_data[col].notna() & (df_data[col].astype(str).str.strip() != "")
-        invalid = filled & ~df_data[col].astype(str).str.strip().str.lower().isin(valid_normalized)
+        valid_normalized = {_normalize_for_domain_match(v) for v in valid_set}
+        normalized_col = df_data[col].astype(str).map(_normalize_for_domain_match)
+        filled = df_data[col].notna() & (normalized_col != "")
+        invalid = filled & ~normalized_col.isin(valid_normalized)
 
         if not invalid.any():
             continue
@@ -380,6 +392,86 @@ def _resolve_table_sources(
         f"OID inferido desde filename: {inferred_oid}."
     )
     return [(inferred_oid, template_sheet)]
+
+
+def upload_alation_format(
+    api_token: str = "",
+    log_callback: Callable[[str], None] | None = None,
+) -> None:
+    """Sube CSVs en formato nativo de Alation directo, sin merge ni lang.
+
+    Lee los `.csv` que el usuario haya cargado en `data/format/`, deriva el
+    OID del prefijo del nombre (`{oid}_…csv`) y los entrega tal cual al
+    endpoint `data_dictionary/table/{oid}/upload/`.
+
+    Pensado para el flujo "descargo → edito el CSV a mano → subo de vuelta":
+    el archivo ya viene en el formato que Alation espera, no hace falta
+    fusionarlo con un Excel ni traducirlo entre ES/EN.
+
+    Args:
+        api_token:    API Token (sesión). Si vacío, usa .env.
+        log_callback: Función para emitir progreso.
+    """
+    _log = log_callback or logger.info
+
+    ok, msg = validate_auth("upload", api_token=api_token)
+    if not ok:
+        _log(f"❌ Auth fallida: {msg}")
+        raise RuntimeError(msg)
+    _log(f"✓ {msg}")
+
+    files_csv = sorted(settings.source_format.glob("*.csv"))
+    if not files_csv:
+        _log("⚠ No hay CSV en data/format/. Sube primero un archivo en formato Alation.")
+        raise FileNotFoundError("No hay CSV en data/format/")
+
+    _log(f"📦 {len(files_csv)} archivo(s) CSV listos para subir en formato Alation.")
+
+    total_uploaded = 0
+    total_failed = 0
+
+    for path_csv in files_csv:
+        _log(f"📄 Procesando: {path_csv.name}")
+
+        oid_match = re.match(r"^(\d+)_", path_csv.name)
+        if not oid_match:
+            _log(
+                f"  ❌ {path_csv.name}: no se pudo extraer OID del nombre. "
+                "Debe empezar con dígitos seguidos de '_'."
+            )
+            total_failed += 1
+            continue
+        oid = oid_match.group(1)
+
+        try:
+            encoding = _detect_encoding(str(path_csv))
+            url = (
+                f"{settings.alation_base_url}"
+                f"/integration/v1/data_dictionary/table/{oid}/upload/"
+            )
+            status = _upload_to_alation(url, str(path_csv), encoding, api_token)
+            _log(f"    ✅ OID={oid} subido exitosamente · HTTP {status}")
+            total_uploaded += 1
+
+        except requests.HTTPError as http_err:
+            _log(f"    ❌ OID={oid}: Alation rechazó la subida — {http_err}")
+            logger.error("HTTPError OID=%s: %s", oid, http_err)
+            total_failed += 1
+
+        except Exception as exc:
+            _log(f"    ❌ Error procesando {path_csv.name}: {exc}")
+            logger.exception("Error procesando %s", path_csv.name)
+            total_failed += 1
+
+    parts = [f"✅ {total_uploaded} CSV(s) subidos a Alation"]
+    if total_failed:
+        parts.append(f"❌ {total_failed} fallido(s) (revisa los logs)")
+    _log(f"\n{'  |  '.join(parts)}")
+
+    if total_uploaded == 0 and total_failed > 0:
+        raise RuntimeError(
+            f"Ningún CSV se subió correctamente. {total_failed} error(es). Revisa los logs."
+        )
 
 
 def upload_all(

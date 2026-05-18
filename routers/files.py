@@ -1,5 +1,6 @@
 """Endpoints para gestionar archivos de datos (Tables.xlsx, CSVs, Excels)."""
 import io
+import re
 import shutil
 import zipfile
 from datetime import datetime
@@ -11,6 +12,9 @@ from fastapi.responses import FileResponse, Response
 
 from models.schemas import FileInfo, TablesStatus
 from core.settings import settings
+
+# Formato esperado para CSVs en modo Alation: "{oid}_{...}.csv"
+_ALATION_FILENAME_RE = re.compile(r"^\d+_.+\.csv$", re.IGNORECASE)
 
 router = APIRouter()
 
@@ -180,18 +184,46 @@ async def delete_alation_files(
 
 @router.get("/format", response_model=list[FileInfo])
 async def list_format_files():
-    """Lista los Excel de enriquecimiento (data/format/)."""
-    return _list_dir(settings.source_format, "*.xlsx")
+    """Lista los archivos de enriquecimiento (data/format/): .xlsx y .csv."""
+    directory = settings.source_format
+    if not directory.exists():
+        return []
+    files = list(directory.glob("*.xlsx")) + list(directory.glob("*.csv"))
+    return [_file_info(f) for f in sorted(files)]
 
 
 @router.post("/format/upload", response_model=FileInfo, status_code=201)
 async def upload_format_file(file: UploadFile = File(...)):
-    """Sube un Excel de enriquecimiento a data/format/."""
-    if not (file.filename or "").endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Solo se aceptan archivos .xlsx")
+    """Sube un archivo de enriquecimiento a data/format/.
+
+    Acepta dos formatos:
+    - `.xlsx` (DataGov): plantilla con encabezados ES/EN para hacer merge.
+    - `.csv` (Alation): el nombre DEBE empezar con `{oid}_…` para permitir
+      identificar a qué tabla pertenece. Lo emite la propia descarga.
+    """
+    name = file.filename or ""
+    lower = name.lower()
+
+    if lower.endswith(".xlsx"):
+        pass  # válido
+    elif lower.endswith(".csv"):
+        if not _ALATION_FILENAME_RE.match(name):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "El CSV debe seguir el formato '{oid}_…csv' (ej: "
+                    "'105280_dbzprd_mex_oxxo.cons_mdm_servicios.DIM_TABLA.csv'). "
+                    "Suele venir directo de la descarga."
+                ),
+            )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Solo se aceptan archivos .xlsx (DataGov) o .csv (Alation).",
+        )
 
     settings.source_format.mkdir(parents=True, exist_ok=True)
-    dest = settings.source_format / file.filename
+    dest = settings.source_format / name
 
     with dest.open("wb") as out:
         shutil.copyfileobj(file.file, out)
@@ -201,7 +233,7 @@ async def upload_format_file(file: UploadFile = File(...)):
 
 @router.delete("/format/{filename}", status_code=204)
 async def delete_format_file(filename: str):
-    """Elimina un Excel de enriquecimiento de data/format/."""
+    """Elimina un archivo de enriquecimiento de data/format/ (.xlsx o .csv)."""
     target = settings.source_format / filename
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"'{filename}' no encontrado.")
