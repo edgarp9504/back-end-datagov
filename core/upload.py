@@ -11,6 +11,7 @@ import requests
 
 from core.settings import settings
 from core.alation_client import validate_auth
+from core.download import _download_table
 
 logger = logging.getLogger(__name__)
 
@@ -476,6 +477,7 @@ def upload_alation_format(
 
 def upload_all(
     api_token: str = "",
+    bearer_token: str = "",
     lang: str = "es",
     log_callback: Callable[[str], None] | None = None,
 ) -> None:
@@ -485,8 +487,13 @@ def upload_all(
     El Excel debe tener una hoja por tabla, con el nombre = OID numérico de la tabla.
     Hojas con nombre no numérico (Guía, LISTAS, etc.) se ignoran automáticamente.
 
+    Si el CSV de Alation para un OID no existe en `data/alation/`, se descarga
+    automáticamente antes del merge.
+
     Args:
         api_token:    API Token del usuario (sesión). Si vacío, usa .env.
+        bearer_token: Bearer Token del usuario (sesión). Necesario para
+                      auto-descargar CSVs faltantes. Si vacío, usa .env.
         lang:         "es" o "en".
         log_callback: Función para emitir progreso.
     """
@@ -494,11 +501,18 @@ def upload_all(
 
     ok, msg = validate_auth("upload", api_token=api_token)
     if not ok:
-        _log(f"❌ Auth fallida: {msg}")
+        _log(f"❌ Auth fallida (upload): {msg}")
+        raise RuntimeError(msg)
+    _log(f"✓ {msg}")
+
+    ok, msg = validate_auth("download", bearer_token=bearer_token, api_token=api_token)
+    if not ok:
+        _log(f"❌ Auth fallida (download): {msg}")
         raise RuntimeError(msg)
     _log(f"✓ {msg}")
 
     settings.destination.mkdir(parents=True, exist_ok=True)
+    settings.source_alation.mkdir(parents=True, exist_ok=True)
 
     config = CONFIG_ES if lang == "es" else CONFIG_EN
     files_xls = sorted(settings.source_format.glob("*.xlsx"))
@@ -507,11 +521,9 @@ def upload_all(
         _log("⚠ No hay Excel en data/format/.")
         raise FileNotFoundError("No hay Excel en data/format/")
 
-    # Índice de CSVs disponibles: OID → Path
+    # Índice de CSVs disponibles: OID → Path. Puede estar vacío al inicio:
+    # los CSVs faltantes se descargan dentro del loop.
     csv_index = _build_csv_index(settings.source_alation)
-    if not csv_index:
-        _log("⚠ No hay CSV en data/alation/. Ejecuta primero la descarga.")
-        raise FileNotFoundError("No hay CSV en data/alation/")
 
     total_uploaded = 0
     total_warned = 0
@@ -543,16 +555,27 @@ def upload_all(
         ids_detectados = [oid for oid, _ in table_sources]
         _log(f"  Trabajando con {len(ids_detectados)} ID(s): {', '.join(ids_detectados)}")
 
-        # Detectar hojas sin CSV
+        # Auto-descargar CSVs faltantes desde Alation antes del merge.
+        oids_faltantes = [oid for oid, _ in table_sources if oid not in csv_index]
+        if oids_faltantes:
+            _log(f"  ⬇ Descargando CSV de Alation para {len(oids_faltantes)} OID(s) sin CSV local...")
+            for oid in oids_faltantes:
+                try:
+                    _download_table(int(oid), bearer_token, api_token, _log)
+                except Exception as exc:
+                    _log(f"    ⚠ No se pudo descargar OID={oid}: {exc}")
+                    logger.exception("Auto-descarga falló OID=%s", oid)
+            # Re-indexar tras las descargas
+            csv_index = _build_csv_index(settings.source_alation)
+
+        # Detectar hojas sin CSV (tras intentar la auto-descarga)
         ids_con_csv = [(oid, sheet_name) for oid, sheet_name in table_sources if oid in csv_index]
         ids_sin_csv = [(oid, sheet_name) for oid, sheet_name in table_sources if oid not in csv_index]
 
         if ids_sin_csv:
             faltantes = ", ".join(f"{oid} (hoja: {sheet_name})" for oid, sheet_name in ids_sin_csv)
             _log(
-                f"  ⚠ Estás trabajando con {len(table_sources)} ID(s). "
-                f"Falta CSV descargado para: {faltantes}. "
-                f"Esas hojas serán omitidas."
+                f"  ⚠ No se pudo obtener CSV para: {faltantes}. Esas hojas serán omitidas."
             )
             total_warned += len(ids_sin_csv)
 

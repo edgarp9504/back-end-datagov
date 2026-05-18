@@ -62,6 +62,7 @@ async def start_upload(request: UploadRequest, tokens: dict = Depends(get_tokens
             job,
             upload_all,
             api_token=tokens["api_token"],
+            bearer_token=tokens["bearer_token"],
             lang=request.lang,
         )
     return JobResponse(job_id=job.job_id, status=job.status)
