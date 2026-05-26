@@ -55,6 +55,7 @@ async def start_upload(request: UploadRequest, tokens: dict = Depends(get_tokens
             job,
             upload_alation_format,
             api_token=tokens["api_token"],
+            oids=request.oids,
         )
     else:
         job = create_job(f"Carga ({request.lang.upper()})")
@@ -64,6 +65,7 @@ async def start_upload(request: UploadRequest, tokens: dict = Depends(get_tokens
             api_token=tokens["api_token"],
             bearer_token=tokens["bearer_token"],
             lang=request.lang,
+            oids=request.oids,
         )
     return JobResponse(job_id=job.job_id, status=job.status)
 

@@ -397,6 +397,7 @@ def _resolve_table_sources(
 
 def upload_alation_format(
     api_token: str = "",
+    oids: list[int] | None = None,
     log_callback: Callable[[str], None] | None = None,
 ) -> None:
     """Sube CSVs en formato nativo de Alation directo, sin merge ni lang.
@@ -411,6 +412,8 @@ def upload_alation_format(
 
     Args:
         api_token:    API Token (sesión). Si vacío, usa .env.
+        oids:         Filtro opcional de tablas. Si trae OIDs, solo se suben
+                      los CSV cuyo OID esté en la lista; si es None/vacío, todos.
         log_callback: Función para emitir progreso.
     """
     _log = log_callback or logger.info
@@ -426,16 +429,21 @@ def upload_alation_format(
         _log("⚠ No hay CSV en data/format/. Sube primero un archivo en formato Alation.")
         raise FileNotFoundError("No hay CSV en data/format/")
 
+    # Filtro opcional por tablas seleccionadas en el navegador.
+    oid_filter = {str(o) for o in (oids or [])}
+    if oid_filter:
+        _log(f"🔎 Filtro activo: solo se publicarán {len(oid_filter)} tabla(s) seleccionada(s).")
+
     _log(f"📦 {len(files_csv)} archivo(s) CSV listos para subir en formato Alation.")
 
     total_uploaded = 0
     total_failed = 0
+    total_skipped = 0
 
     for path_csv in files_csv:
-        _log(f"📄 Procesando: {path_csv.name}")
-
         oid_match = re.match(r"^(\d+)_", path_csv.name)
         if not oid_match:
+            _log(f"📄 Procesando: {path_csv.name}")
             _log(
                 f"  ❌ {path_csv.name}: no se pudo extraer OID del nombre. "
                 "Debe empezar con dígitos seguidos de '_'."
@@ -443,6 +451,13 @@ def upload_alation_format(
             total_failed += 1
             continue
         oid = oid_match.group(1)
+
+        if oid_filter and oid not in oid_filter:
+            _log(f"  ↷ {path_csv.name}: OID={oid} no está en la selección. Omitido.")
+            total_skipped += 1
+            continue
+
+        _log(f"📄 Procesando: {path_csv.name}")
 
         try:
             encoding = _detect_encoding(str(path_csv))
@@ -465,6 +480,8 @@ def upload_alation_format(
             total_failed += 1
 
     parts = [f"✅ {total_uploaded} CSV(s) subidos a Alation"]
+    if total_skipped:
+        parts.append(f"↷ {total_skipped} omitido(s) por filtro de selección")
     if total_failed:
         parts.append(f"❌ {total_failed} fallido(s) (revisa los logs)")
     _log(f"\n{'  |  '.join(parts)}")
@@ -479,6 +496,7 @@ def upload_all(
     api_token: str = "",
     bearer_token: str = "",
     lang: str = "es",
+    oids: list[int] | None = None,
     log_callback: Callable[[str], None] | None = None,
 ) -> None:
     """
@@ -495,6 +513,8 @@ def upload_all(
         bearer_token: Bearer Token del usuario (sesión). Necesario para
                       auto-descargar CSVs faltantes. Si vacío, usa .env.
         lang:         "es" o "en".
+        oids:         Filtro opcional de tablas. Si trae OIDs, solo se publican
+                      las hojas cuyo OID esté en la lista; si es None/vacío, todas.
         log_callback: Función para emitir progreso.
     """
     _log = log_callback or logger.info
@@ -525,9 +545,15 @@ def upload_all(
     # los CSVs faltantes se descargan dentro del loop.
     csv_index = _build_csv_index(settings.source_alation)
 
+    # Filtro opcional por tablas seleccionadas en el navegador.
+    oid_filter = {str(o) for o in (oids or [])}
+    if oid_filter:
+        _log(f"🔎 Filtro activo: solo se publicarán {len(oid_filter)} tabla(s) seleccionada(s).")
+
     total_uploaded = 0
     total_warned = 0
     total_failed = 0
+    total_skipped = 0
 
     for path_xls in files_xls:
         _log(f"📄 Procesando Excel: {path_xls.name}")
@@ -551,6 +577,17 @@ def upload_all(
         if not table_sources:
             _log(f"  ⚠ No se encontraron hojas con ID numérico en {path_xls.name}.")
             continue
+
+        # Filtro por tablas seleccionadas en el navegador.
+        if oid_filter:
+            skipped = [oid for oid, _ in table_sources if oid not in oid_filter]
+            table_sources = [(oid, s) for oid, s in table_sources if oid in oid_filter]
+            if skipped:
+                _log(f"  ↷ Omitidas por filtro de selección: {', '.join(skipped)}")
+                total_skipped += len(skipped)
+            if not table_sources:
+                _log(f"  ⚠ Ninguna hoja de {path_xls.name} está en la selección. Omitido.")
+                continue
 
         ids_detectados = [oid for oid, _ in table_sources]
         _log(f"  Trabajando con {len(ids_detectados)} ID(s): {', '.join(ids_detectados)}")
@@ -673,6 +710,8 @@ def upload_all(
 
     # ── Resumen final ─────────────────────────────────────────────────────────
     parts = [f"✅ {total_uploaded} tabla(s) subidas exitosamente a Alation"]
+    if total_skipped:
+        parts.append(f"↷ {total_skipped} omitida(s) por filtro de selección")
     if total_warned:
         parts.append(f"⚠ {total_warned} omitida(s) por falta de CSV")
     if total_failed:

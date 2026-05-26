@@ -24,6 +24,9 @@ class UploadRequest(BaseModel):
     # `lang` se ignora).
     dict_type: Literal["datagov", "alation"] = "datagov"
     lang: str = "es"
+    # Filtro opcional de tablas: si trae OIDs, solo se publican los archivos
+    # cuyo OID esté en esta lista. Si es None/vacío, se suben todos.
+    oids: Optional[list[int]] = None
 
 
 class DownloadRequest(BaseModel):
